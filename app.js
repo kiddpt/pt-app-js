@@ -1,6 +1,6 @@
 
 var App = function(general_settings) {
-	"use strict";
+	// "use strict";
 
 	
 
@@ -34,6 +34,7 @@ var App = function(general_settings) {
 				/** Server Response commands:
 					* (alert) { title, body, type }
 					* (clear_selection) { target }
+					* (form_reset) { target }
 					* (load) { url, delay }
 					* (popup) { title, body, width }
 					* (popup_close) { target }
@@ -55,7 +56,7 @@ var App = function(general_settings) {
 			} else if (status != "success") {
 				$.pnotify({
 					title: "Server Error",
-					text: "Something went wrong in our server." + typeof response,
+					text: "Something went wrong in our server.",
 					type: "warning"
 				});
 			}
@@ -77,10 +78,10 @@ var App = function(general_settings) {
 					self.process_response(response);
 				} catch(e) {
 				}
-			} else {
+			} else if (a.status !== 200) {
 				$.pnotify({
 					"title": "Server Error",
-					"text" : "Please try again later. Please contact Promotexter if the problem persists.",
+					"text" : "Please try again later. Error: " + a.statusText,
 					"type" : "error"
 				});
 			}
@@ -110,15 +111,42 @@ var App = function(general_settings) {
 				}
 			});
 		},
+		form_reset: function() {
+			$(this.target).each(function(){
+				this.reset();
+			});
+		},
 		dynamic_variables: function() {
 			var container = this.target;
 			for(var i in this.variables){
-				$(container).find("[data-variable='" + i + "']").html(this.variables[i]);
+				var variable = $(container).find("[data-variable='" + i + "']");
+				variable.html(this.variables[i]);
+				var classes = $(variable).data("class");
+
+				var matched = false;
+				for(var j in classes) {
+					if (this.variables[i] == j) {
+						$(variable).addClass(classes[j]);
+						matched = classes[j].split(" ");
+						console.log("Add class", matched);
+					}
+					else {
+						$(classes[j].split(" ")).each(function(i,e){
+							if ($.inArray(e, matched) === -1) {
+								console.log("Remove class", e, matched, $.inArray(e, matched));
+								$(variable).removeClass(e);
+							}
+						});
+					}
+				}
+				if (!matched && classes && classes['default']) {
+					$(variable).addClass(classes['default']);
+				}
 			};
 		},
 		form_alert: function() {
 			if (this && (this.body || this.title) && this.form_id)
-			$(this.form_id).prepend("<div class='alert alert-" + this.type + " form-alert'><strong>" + (this.title||"") + "</strong> " + (this.body||"") + "</div>");
+			$(this.form_id).prepend("<div class='alert alert-" + this.type + " form-alert'><strong>" + (this.title||"") + "</strong> <br/>" + (this.body||"") + "</div>");
 		},
 		fill_form: function() {
 			for (var form in this) {
@@ -153,10 +181,21 @@ var App = function(general_settings) {
 					async: async,
 					dataType: "json",
 					initiator: "load function",
+					retries: 0,
+					retryLimit: 3,
 					success: function(response, status, xhr){
 						self.process_response(response, status, xhr, target);
 					},
-					complete: oncomplete
+					complete: oncomplete,
+					error: function(){
+			            this.retries++;
+			            if (this.retries <= this.retryLimit) {
+			                $.ajax(this);
+			                if (console && console.log) console.log("Retry", this);
+			                return;
+			            }            
+			            return;
+					}
 				});
 			}, this.delay);
 		},
@@ -499,7 +538,7 @@ var App = function(general_settings) {
 							catch(e) {
 								$.pnotify({
 									type: 'error',
-									title: "Unknown Upload Error",
+									title: "Upload Error",
 									text: xhr.responseText
 								});
 							}
@@ -528,6 +567,8 @@ var App = function(general_settings) {
 			$(parent + ".ajax-region").each(function(){ self.load.apply({ url: $(this).data("url"), target: "#" + $(this).attr("id") }); });
 			$(parent + ".server-status").each(self.server_status);
 			$(parent + ".tree").each(self.render_tree);
+			$(parent + ".form-onkeyup").keyup(self.onkeyup);
+			$(parent + ".live-clock").each(self.live_clock);
 
 			self.render_chart(parent + ".flot-comp");
 			self.render_datatable(parent + ".datatable");
@@ -665,6 +706,24 @@ var App = function(general_settings) {
 				$(target).val(e.format("yyyy-mm-dd"));
 			});
 		},
+		live_clock: function() {
+			var scripts = ['assets/javascripts/moment.min.js'];
+
+			var clock = this;
+			self.async_script(scripts, function(){
+				var timeDiff = Math.round((new Date($(clock).data("server-time")) - new Date()) / 1000);
+				var format = $(clock).data("format") || "ha z";
+				var update = function() {
+					var date = moment(new Date());
+					date.add('seconds', timeDiff);
+
+					$(clock).html(date.format(format));
+				}
+				update();
+				setInterval(update, 60000);
+			});
+
+		},
 		line_check: function() {
 			var label = $(this).next(), label_text = label.text();
 
@@ -698,7 +757,7 @@ var App = function(general_settings) {
 			
 			$(parents).each(function(){
 				var parent = this;
-				console.log(parent);
+				// console.log(parent);
 				if ($(parent).prop("checked") == false && checked)
 					$(parent).prop("checked", true).iCheck("update");
 			})
@@ -757,7 +816,20 @@ var App = function(general_settings) {
 		},
 		options_pie_chart: {
 			series: {
-				pie: { show: true },
+				pie: { 
+					show: true,
+					radius: 1,
+					label: {
+						show: true,
+						radius: 3/4,
+						formatter: function (label, series) {
+							return "<div style='font-size:8pt; text-align:center; padding:2px; color:white;'>" + label + "<br/>" + Math.round(series.percent) + "%</div>";
+						},
+						background: { 
+							opacity: 0.8
+						}
+					} 
+				},
 				points: { show: true }
 			},
 			xaxis: {
@@ -767,7 +839,12 @@ var App = function(general_settings) {
 				ticks: 8,
 				min: 0
 			},
+			legend: {
+				show: false
+			},
 			grid: {
+				hoverable: true,
+				clickable: true,
 				backgroundColor: { colors: [ "#fff", "#eee" ] },
 				borderWidth: {
 					top: 1,
@@ -776,6 +853,10 @@ var App = function(general_settings) {
 					left: 2
 				}
 			}
+		},
+		onkeyup: function(selector) {
+			var fn_id = $(this).data("fn");
+			eval($(fn_id).html());
 		},
 		render_chart: function(selector){
 			$(selector).each(function() {
@@ -813,7 +894,7 @@ var App = function(general_settings) {
 		},
 		render_bar_chart: function(chart, dataset, options) {
 			var scripts = ['assets/javascripts/flot/jquery.flot.js','assets/javascripts/flot/jquery.flot.resize.js','assets/javascripts/flot/jquery.flot.categories.js'];
-							console.log(chart, dataset, options);
+							// console.log(chart, dataset, options);
 
 			self.async_script(scripts, function(){
 				if (dataset.source)
@@ -823,12 +904,12 @@ var App = function(general_settings) {
 						url: dataset.source,
 						dataType:"json",
 						success: function(response) {
-							console.log("#" + chart, response.data, $.extend({}, self.options_bar_chart, response.options));
+							// console.log("#" + chart, response.data, $.extend({}, self.options_bar_chart, response.options));
 							$.plot("#" + chart, response.data, $.extend({}, self.options_bar_chart, response.options));
 						}
 					});
 				else {
-							console.log(chart, dataset, $.extend({}, self.options_bar_chart, options));
+							// console.log(chart, dataset, $.extend({}, self.options_bar_chart, options));
 					$.plot(chart, dataset, $.extend({}, self.options_bar_chart, options));
 				}
 			});
@@ -907,7 +988,7 @@ var App = function(general_settings) {
 					{
 						if ($(".dataTables_empty").length) $(".dataTables_empty").attr("colspan", parseInt($(".dataTables_empty").attr("colspan")) + 2);
 
-						if (hasSelection || actionList || colManip)
+						if (hasSelection || actionList || colManip || 1)
 							$(this.fnGetNodes()).each(function()
 							{
 								if (hasSelection) 
@@ -964,7 +1045,7 @@ var App = function(general_settings) {
 
 												var url = this.url + params + (!this.noSlash?'/':'') + row_id + (this.url_suffix||"");
 
-												action = $("<a title='" + this.action + "' " + (this.ajaxify === false? "href='" + url + "'" : " class='btn btn-default btn-xs ajaxify' " )+ " data-confirm='" + (this.confirm||"") + "' data-url='" + url + "' data-dblclick='" + (this.ondblclick || "") + "'><i class='app-row-icon fa fa-2 fa-" + this.icon + "'></i></a>&nbsp;");
+												action = $("<a title='" + this.action + "' " + (this.ajaxify === false? "href='" + url + "'  class='btn btn-default btn-xs' " : " class='btn btn-default btn-xs ajaxify' " )+ " data-confirm='" + (this.confirm||"") + "' data-url='" + url + "' data-dblclick='" + (this.ondblclick || "") + "'><i class='app-row-icon fa fa-2 fa-" + this.icon + "'></i></a>&nbsp;");
 												$(actions).append(action);
 											}
 											else if (this.handler && this.handler.fn_name && this.handler.fn) {
@@ -1024,6 +1105,49 @@ var App = function(general_settings) {
 										}
 									});
 								}
+
+
+								if(1 || self.format_date == true)
+								{
+									var sData = table.fnGetData( this );
+									var row_id = this.id;
+									// var cols = 	table.aoColumns;
+									// var cols = table.columns();
+
+									// console.log(sData);
+									// console.log(cols);
+
+									for(var r in sData)
+									{
+
+										var content = sData[r];
+										var patt = /^(((\d{4})(-)(0[13578]|10|12)(-)(0[1-9]|[12][0-9]|3[01]))|((\d{4})(-)(0[469]|1‌​1)(-)([0][1-9]|[12][0-9]|30))|((\d{4})(-)(02)(-)(0[1-9]|1[0-9]|2[0-8]))|(([02468]‌​[048]00)(-)(02)(-)(29))|(([13579][26]00)(-)(02)(-)(29))|(([0-9][0-9][0][48])(-)(0‌​2)(-)(29))|(([0-9][0-9][2468][048])(-)(02)(-)(29))|(([0-9][0-9][13579][26])(-)(02‌​)(-)(29)))(\s([0-1][0-9]|2[0-4]):([0-5][0-9]):([0-5][0-9]))$/;
+
+										if(patt.test(content) && content)
+										{
+											var offset = (hasSelection?1:0);
+
+											if (options.hideCols)
+												for (var i = 0; i < options.hideCols.length; i++) {
+													if (options.hideCols[i] < r) offset--;
+												}
+											var column = $(datatable_id + " #" + row_id).find("td:eq(" + (offset + r) + ")");
+											$(column).html(content.dateFormat(new Date(content),'%m %d %Y, %H:%M:%S'));
+										}
+
+									}
+									// sData.each(function(key,value){
+									// 	console.log(value);
+									// });
+
+									// /^\d\d\d\d-(\d)?\d-(\d)?\d \d\d:\d\d:\d\d$/g
+									
+
+
+
+									// 
+									// console.log(table.fnGetData( this ));
+								}
 							});
 
 						if (hasSelection)
@@ -1038,6 +1162,9 @@ var App = function(general_settings) {
 								self.refresh_table.apply({target:datatable_id});
 							}, options.refresh);
 						}
+
+
+
 					}
 				}
 				self.datatableSelected[datatable_id] = [];
@@ -1065,11 +1192,12 @@ var App = function(general_settings) {
 			var parent = this;
 			$.ajax({
 				url: data.url,
+				dataType: "json",
 				beforeSend: function() {
 					$(parent).html("<span class='label label-info'>Checking connection</span>");
 				},
-				success: function() {
-					$(parent).html("<span class='label label-success'>Up</span>");
+				success: function(obj) {
+					if (obj) $(parent).html("<span class='label label-success'>Up</span>");
 				},
 				error: function() {
 					$(parent).html("<span class='label label-danger'>Down</span>");
@@ -1198,8 +1326,6 @@ var App = function(general_settings) {
 			$.fn.modal.Constructor.prototype.enforceFocus = function () {};
 			$.pnotify.defaults.styling = "bootstrap3";
 			$.pnotify.defaults.animation = 'none';
-			$.pnotify.defaults.history.menu = false;
-			$.pnotify.defaults.history.history = false;
 			$.pnotify.defaults.position_animate_speed = 150;
 
 			if (location.hash.indexOf("!") == 1) {
@@ -1403,3 +1529,40 @@ String.prototype.ucwords = function() {
 			return $1.toUpperCase();
 		});
 }
+
+String.prototype.dateFormat = function(date, fstr, utc) 
+{
+	var d = new Date();
+	var month = new Array();
+	month[0] = "January";
+	month[1] = "February";
+	month[2] = "March";
+	month[3] = "April";
+	month[4] = "May";
+	month[5] = "June";
+	month[6] = "July";
+	month[7] = "August";
+	month[8] = "September";
+	month[9] = "October";
+	month[10] = "November";
+	month[11] = "December";
+	var n = month[d.getMonth()];
+
+    utc = utc ? 'getUTC' : 'get';
+    return fstr.replace (/%[YmdHMS]/g, function (m) {
+      switch (m) {
+      case '%Y': return date[utc + 'FullYear'] (); // no leading zeros required
+      case '%m': m = month[ date[utc + 'Month'] ()]; break;
+      case '%d': m = date[utc + 'Date'] (); break;
+      case '%H': m = date[utc + 'Hours'] (); break;
+      case '%M': m = date[utc + 'Minutes'] (); if (m < 10) m = "0" + m; break;
+      case '%S': m = date[utc + 'Seconds'] (); if (m < 10) m = "0" + m; break;
+
+   
+
+      default: return m.slice (1); // unknown code, remove %
+      }
+      // add leading zero if required
+      return (m);
+    });
+ }
